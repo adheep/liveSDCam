@@ -1,0 +1,22 @@
+# LiveSDCam dependencies
+#
+# IMPORTANT: torch + torchvision must come from the CUDA 12.8 (Blackwell / sm_120) index.
+# Install them FIRST, separately:
+#
+#   pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+#
+# then:  pip install -r requirements.txt
+
+torch==2.11.0          # installed from the cu128 index (see note above)
+torchvision==0.26.0    # installed from the cu128 index (see note above)
+
+diffusers==0.37.1
+transformers==5.10.1
+accelerate==1.13.0
+safetensors==0.7.0
+peft==0.19.1            # for loading the LCM-LoRA (Wardrobe inpaint)
+
+gradio==6.16.0
+opencv-python==4.13.0.92
+numpy==2.4.4
+pillow==12.2.0

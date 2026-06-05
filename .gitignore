@@ -1,0 +1,29 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated images / test artifacts (some contain webcam captures — keep private)
+*.png
+*.jpg
+*.jpeg
+
+# Model / HF caches
+.cache/
+*.safetensors
+*.ckpt
+*.pth
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code local state
+.claude/
