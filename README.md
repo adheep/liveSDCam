@@ -53,6 +53,19 @@ Verify the GPU is seen:
 python check_gpu.py
 ```
 
+### 4. (Recommended) pre-download the models
+
+Models are pulled from Hugging Face and cached locally (in your shared HF cache,
+**not** in this repo — total ~6 GB). You can pre-fetch them all up front so the
+first run isn't interrupted by downloads (and offline use works):
+
+```bash
+python download_models.py
+```
+
+If you skip this, each model simply downloads automatically the first time you
+use the mode that needs it.
+
 ## Run
 
 ```bash
@@ -60,9 +73,7 @@ python app.py
 ```
 
 Opens at **http://127.0.0.1:7860**. Click the **⏺ Record** button on the webcam
-to start streaming. Models download from Hugging Face on first use
-(SD-Turbo ~2.5 GB; the ControlNet / inpaint / parser models load lazily the
-first time you switch to that mode).
+to start streaming.
 
 ## How it works
 
@@ -78,6 +89,7 @@ read-out is shown under the transformed feed.
 | `engine_advanced.py` | Advanced engine (Canny ControlNet + temporal smoothing) |
 | `engine_wardrobe.py` | Wardrobe engine (clothes parser + SD1.5 LCM-inpaint, live + capture) |
 | `segmenter.py` | Person segmenter + background-composite helper (Keep background) |
+| `download_models.py` | Pre-fetch + validate all required models |
 | `check_gpu.py` | GPU / CUDA sanity check |
 | `smoke_*.py`, `test_*.py` | Standalone validation scripts used during development |
 
