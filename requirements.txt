@@ -20,3 +20,7 @@ gradio==6.16.0
 opencv-python==4.13.0.92
 numpy==2.4.4
 pillow==12.2.0
+
+# Windows-only: provides Triton so torch.compile works (big speedup). On Linux,
+# Triton ships with the torch cu128 wheel, so install plain `triton` instead.
+triton-windows==3.7.0.post26 ; sys_platform == "win32"

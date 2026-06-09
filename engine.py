@@ -37,13 +37,15 @@ class Engine:
             MODEL_ID, torch_dtype=DTYPE, variant="fp16", safety_checker=None
         ).to(DEVICE)
         self.pipe.set_progress_bar_config(disable=True)
-        print(f"[engine] loaded in {time.time()-t0:.1f}s; warming up...")
+        from perf import optimize_pipe
+        optimize_pipe(self.pipe, DTYPE, DEVICE, use_taesd=True, compile_unet=True, label=":lite")
+        print(f"[engine] loaded in {time.time()-t0:.1f}s; warming up (compiling)...")
         self._warmup()
         print("[engine] ready.")
 
     def _warmup(self):
         dummy = Image.new("RGB", (SIZE, SIZE), (128, 128, 128))
-        for _ in range(3):
+        for _ in range(5):  # extra iters so torch.compile finishes before serving
             self._infer(dummy, "a photo", 0.5, 2, fixed_seed=True)
         torch.cuda.synchronize()
 

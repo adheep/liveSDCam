@@ -34,12 +34,6 @@ def get_sd_turbo():
         "stabilityai/sd-turbo", torch_dtype=DTYPE, variant="fp16", safety_checker=None)
 
 
-def get_canny_controlnet():
-    from diffusers import ControlNetModel
-    ControlNetModel.from_pretrained(
-        "thibaud/controlnet-sd21-canny-diffusers", torch_dtype=DTYPE, use_safetensors=False)
-
-
 def get_wardrobe_inpaint():
     from diffusers import AutoPipelineForInpainting
     pipe = AutoPipelineForInpainting.from_pretrained(
@@ -60,12 +54,18 @@ def get_person_segmenter():
     deeplabv3_mobilenet_v3_large(weights=DeepLabV3_MobileNet_V3_Large_Weights.COCO_WITH_VOC_LABELS_V1)
 
 
+def get_captioner():
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
+    BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large")
+
+
 print("Pre-fetching LiveSDCam models (this may take a while on first run)...")
-step("SD-Turbo               (Lite / Advanced base)", get_sd_turbo)
-step("Canny ControlNet SD2.1 (Advanced)", get_canny_controlnet)
-step("Dreamshaper-8 inpaint + LCM-LoRA (Wardrobe)", get_wardrobe_inpaint)
+step("SD-Turbo               (Lite base)", get_sd_turbo)
+step("Dreamshaper-8 inpaint + LCM-LoRA (Wardrobe / Try-On)", get_wardrobe_inpaint)
 step("Segformer clothes parser (Wardrobe)", get_clothes_parser)
 step("DeepLabV3-MobileNet    (Keep background)", get_person_segmenter)
+step("BLIP captioner         (Try-On garment description)", get_captioner)
 
 print("\n" + "=" * 50)
 print(f"Done. {len(OK)} ok, {len(FAIL)} failed.")

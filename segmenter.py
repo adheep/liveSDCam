@@ -1,6 +1,6 @@
 """Shared person segmenter + background-compositing helper.
 
-Lets Lite/Advanced transform ONLY the person and keep the real webcam
+Lets Lite transform ONLY the person and keep the real webcam
 background. Uses torchvision DeepLabV3-MobileNet on the GPU (no extra deps).
 Lazy-loaded the first time 'Keep background' is enabled.
 """

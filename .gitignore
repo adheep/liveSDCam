@@ -19,6 +19,12 @@ __pycache__/
 *.ckpt
 *.pth
 
+# TLS cert / private key (self-signed, machine-local)
+*.pem
+
+# Cloned third-party repos (e.g. CatVTON) — document the clone step instead
+third_party/
+
 # OS / editor
 .DS_Store
 Thumbs.db

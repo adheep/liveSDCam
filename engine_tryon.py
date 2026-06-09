@@ -1,14 +1,9 @@
-"""LiveSD Wardrobe engine: change ONLY the clothes, keep the character.
+"""LiveSD Try-On (live) engine: IP-Adapter garment-conditioned inpaint.
 
-Parses the garment region (face/hair/hands excluded) and inpaints just that
-region from a text prompt using SD1.5 + LCM-LoRA (few-step, fast). Identity,
-pose and background are the original pixels -- untouched by construction.
-
-Two paths:
-  transform() - live preview, few steps (~3 fps), temporal smoothing
-  capture()   - one-shot high-step render for a clean, shareable result
-
-Lazy-loaded on first use.
+You attach a garment image; it conditions the clothing-region inpaint so the
+live feed shows you in something matching that garment's color/material/style
+(not an exact reproduction -- that's the CatVTON Capture path). Face / pose /
+background preserved. ~2-3 fps. Lazy-loaded on first use.
 """
 import threading
 import time
@@ -32,14 +27,12 @@ INPAINT_ID = "Lykon/dreamshaper-8-inpainting"
 LCM_LORA_ID = "latent-consistency/lcm-lora-sdv1-5"
 PARSER_ID = "mattmdjaga/segformer_b2_clothes"
 SIZE = 512
-# ATR labels: 4=Upper-clothes 5=Skirt 6=Pants 7=Dress 8=Belt 17=Scarf
 GARMENT_CLASSES = (4, 5, 6, 7, 8, 17)
 NEG_PROMPT = "blurry, distorted, deformed, extra limbs, low quality, naked, nsfw"
 LIVE_STEPS = 4
-CAPTURE_STEPS = 10
 
 
-class WardrobeEngine:
+class TryOnEngine:
     def __init__(self):
         self.pipe = None
         self.seg_proc = None
@@ -55,34 +48,34 @@ class WardrobeEngine:
     def load(self):
         if self.loaded:
             return
-        print("[wardrobe] loading clothes parser ...")
+        print("[tryon] loading clothes parser ...")
         t0 = time.time()
         self.seg_proc = SegformerImageProcessor.from_pretrained(PARSER_ID)
         self.seg_model = AutoModelForSemanticSegmentation.from_pretrained(PARSER_ID).to(DEVICE).eval()
-        print("[wardrobe] loading SD1.5 inpaint + LCM-LoRA ...")
+        print("[tryon] loading SD1.5 inpaint + LCM-LoRA + IP-Adapter ...")
         self.pipe = AutoPipelineForInpainting.from_pretrained(
             INPAINT_ID, torch_dtype=DTYPE, safety_checker=None,
         ).to(DEVICE)
         self.pipe.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
         self.pipe.load_lora_weights(LCM_LORA_ID)
         self.pipe.fuse_lora()
+        self.pipe.load_ip_adapter("h94/IP-Adapter", subfolder="models",
+                                  weight_name="ip-adapter_sd15.safetensors")
         self.pipe.set_progress_bar_config(disable=True)
         from perf import optimize_pipe
-        self._full_vae = self.pipe.vae                 # keep full VAE for HQ capture
-        # NOTE: torch.compile breaks the inpaint pipeline (FX-trace error) -> compile off here;
-        # TAESD + channels_last still give a solid speedup.
-        optimize_pipe(self.pipe, DTYPE, DEVICE, use_taesd=True, compile_unet=False, label=":wardrobe")
-        self._taesd_vae = self.pipe.vae                # fast VAE for live preview
-        print(f"[wardrobe] loaded in {time.time()-t0:.1f}s; warming up (compiling)...")
+        # torch.compile breaks the inpaint pipeline (FX-trace error) -> compile off; TAESD still helps.
+        optimize_pipe(self.pipe, DTYPE, DEVICE, use_taesd=True, compile_unet=False, label=":tryon")
+        print(f"[tryon] loaded in {time.time()-t0:.1f}s; warming up (compiling)...")
         self._warmup()
         self.loaded = True
-        print("[wardrobe] ready.")
+        print("[tryon] ready.")
 
     def _warmup(self):
         dummy = Image.new("RGB", (SIZE, SIZE), (120, 120, 120))
         mask = Image.new("L", (SIZE, SIZE), 255)
+        self.pipe.set_ip_adapter_scale(0.7)
         for _ in range(4):  # extra iters so torch.compile finishes before serving
-            self._inpaint(dummy, mask, "a shirt", NEG_PROMPT, LIVE_STEPS, True)
+            self._infer(dummy, mask, dummy, "a person", LIVE_STEPS, 0.7, True)
         torch.cuda.synchronize()
 
     @staticmethod
@@ -106,13 +99,15 @@ class WardrobeEngine:
             m = cv2.GaussianBlur(m, (feather, feather), 0)
         return Image.fromarray(m)
 
-    def _inpaint(self, pil_img, mask_img, prompt, negative, steps, fixed_seed):
+    def _infer(self, pil_img, mask_img, garment_img, prompt, steps, ip_scale, fixed_seed, negative=None):
+        self.pipe.set_ip_adapter_scale(float(ip_scale))
         generator = torch.Generator(DEVICE).manual_seed(1234) if fixed_seed else None
         out = self.pipe(
-            prompt=prompt or "clothing",
+            prompt=prompt or "a person wearing this outfit, detailed clothing, photorealistic",
             negative_prompt=negative or NEG_PROMPT,
             image=pil_img,
             mask_image=mask_img,
+            ip_adapter_image=garment_img,
             num_inference_steps=int(steps),
             guidance_scale=1.5,
             strength=1.0,
@@ -123,17 +118,19 @@ class WardrobeEngine:
     def reset_temporal(self):
         self._smooth_prev = None
 
-    def transform(self, frame, prompt, steps, stabilize, smoothing, negative=None):
-        """Live preview. Returns (output_rgb_np, fps_text). Drops frame if busy."""
-        if not valid_frame(frame):
+    def transform(self, frame, garment, prompt, steps, stabilize, smoothing, ip_scale, negative=None):
+        """Live preview. `garment` is an RGB np array (the attached garment image).
+        Returns (output_rgb_np, fps_text). Drops frame if busy or no garment yet."""
+        if not valid_frame(frame) or not valid_frame(garment):
             return self._last_out, self._fps_text()
         if not self._lock.acquire(blocking=False):
             return self._last_out, self._fps_text()
         try:
             pil = self._prep(frame)
+            garment_pil = Image.fromarray(garment).convert("RGB").resize((SIZE, SIZE))
             mask = self._garment_mask(pil)
             steps = int(steps) if steps else LIVE_STEPS
-            out = self._inpaint(pil, mask, prompt, negative, steps, stabilize)
+            out = self._infer(pil, mask, garment_pil, prompt, steps, ip_scale, stabilize, negative)
 
             a = float(smoothing)
             if a > 0.0 and self._smooth_prev is not None:
@@ -147,25 +144,6 @@ class WardrobeEngine:
         finally:
             self._lock.release()
 
-    def capture(self, frame, prompt, negative=None, steps=CAPTURE_STEPS):
-        """One-shot high-quality render of the current frame (blocks until done).
-        Uses the FULL VAE (not TAESD) for a clean, sharp result."""
-        if not valid_frame(frame):
-            return self._last_out
-        with self._lock:
-            pil = self._prep(frame)
-            mask = self._garment_mask(pil, dilate=9, feather=11)
-            full = getattr(self, "_full_vae", None)
-            taesd = getattr(self, "_taesd_vae", None)
-            if full is not None:
-                self.pipe.vae = full                       # HQ decode for the capture
-            try:
-                out = self._inpaint(pil, mask, prompt, negative, steps, fixed_seed=True)
-            finally:
-                if taesd is not None:
-                    self.pipe.vae = taesd                  # restore fast VAE for live
-            return out
-
     def _tick_fps(self):
         now = time.time()
         if self._last_ts is not None:
@@ -178,5 +156,5 @@ class WardrobeEngine:
 
     def _fps_text(self):
         if self._fps_ema is None:
-            return "warming up..." if self.loaded else "not loaded"
-        return f"{self._fps_ema:4.1f} fps   ({self._frames_done} frames)  [Wardrobe]"
+            return "warming up..." if self.loaded else "attach a garment image to begin"
+        return f"{self._fps_ema:4.1f} fps   ({self._frames_done} frames)  [Try-On live]"
